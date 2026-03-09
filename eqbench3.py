@@ -490,10 +490,26 @@ def _reset_model_data(model_name: str, local_runs_file: str, local_elo_file: str
 
 def main():
     parser = argparse.ArgumentParser(description="Run EQBench3 Scenario Benchmark.")
+    env_test_model_name = os.getenv("TEST_MODEL_NAME")
+    env_judge_model_name = os.getenv("JUDGE_MODEL_NAME")
     # --- Model Identifiers ---
-    parser.add_argument("--test-model", required=True, help="Identifier for the model sent to the API (e.g., 'openai/gpt-4o'). This is the API Model ID.")
+    parser.add_argument(
+        "--test-model",
+        default=env_test_model_name,
+        help=(
+            "Identifier for the model sent to the API (e.g., 'openai/gpt-4o'). "
+            "This is the API Model ID. Defaults to TEST_MODEL_NAME from .env if set."
+        ),
+    )
     parser.add_argument("--model-name", help="Logical identifier for the model (e.g., 'gpt-4o-june-2024') used for tracking and leaderboards. Defaults to the value of --test-model if not provided.")
-    parser.add_argument("--judge-model", help="Identifier for the judge model used for ELO pairwise comparisons and/or Rubric scoring.")
+    parser.add_argument(
+        "--judge-model",
+        default=env_judge_model_name,
+        help=(
+            "Identifier for the judge model used for ELO pairwise comparisons and/or Rubric scoring. "
+            "Defaults to JUDGE_MODEL_NAME from .env if set."
+        ),
+    )
     # --- File Paths ---
     parser.add_argument("--runs-file", default=C.DEFAULT_LOCAL_RUNS_FILE, help=f"File to store local run data (default: {C.DEFAULT_LOCAL_RUNS_FILE}).")
     parser.add_argument("--elo-results-file", default=C.DEFAULT_LOCAL_ELO_FILE, help=f"File to store local ELO results and comparisons (default: {C.DEFAULT_LOCAL_ELO_FILE}).")
@@ -530,6 +546,8 @@ def main():
     # parser.add_argument("--rubric-prompt-file", ...)
 
     args = parser.parse_args()
+    if not args.test_model:
+        parser.error("--test-model is required (or set TEST_MODEL_NAME in .env).")
 
     # Determine the logical model name and API model ID
     api_model_id = args.test_model

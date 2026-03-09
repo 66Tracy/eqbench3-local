@@ -4,8 +4,8 @@ import logging
 import json
 import requests
 import random
-import string
-from typing import Optional, Dict, Any, List # Added List
+from urllib.parse import urlparse, urlunparse
+from typing import Optional, Dict, Any, List
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -22,27 +22,133 @@ class APIClient:
         # Load specific or default API credentials based on model_type
         if model_type == "test":
             self.api_key = os.getenv("TEST_API_KEY", os.getenv("OPENAI_API_KEY"))
-            self.base_url = os.getenv("TEST_API_URL", os.getenv("OPENAI_API_URL", "https://api.openai.com/v1/chat/completions"))
+            raw_base_url = os.getenv("TEST_API_URL", os.getenv("OPENAI_API_URL", "https://api.openai.com/v1/chat/completions"))
         elif model_type == "judge":
             # Judge model is used for ELO pairwise comparisons
             self.api_key = os.getenv("JUDGE_API_KEY", os.getenv("OPENAI_API_KEY"))
-            self.base_url = os.getenv("JUDGE_API_URL", os.getenv("OPENAI_API_URL", "https://api.openai.com/v1/chat/completions"))
+            raw_base_url = os.getenv("JUDGE_API_URL", os.getenv("OPENAI_API_URL", "https://api.openai.com/v1/chat/completions"))
         else: # Default/fallback
             self.api_key = os.getenv("OPENAI_API_KEY")
-            self.base_url = os.getenv("OPENAI_API_URL", "https://api.openai.com/v1/chat/completions")
+            raw_base_url = os.getenv("OPENAI_API_URL", "https://api.openai.com/v1/chat/completions")
+
+        self.base_url = self._normalize_chat_completions_url(raw_base_url)
+        self.provider = self._infer_provider(self.base_url)
 
         self.request_timeout = int(os.getenv("REQUEST_TIMEOUT", request_timeout))
         self.max_retries = int(os.getenv("MAX_RETRIES", max_retries))
         self.retry_delay = int(os.getenv("RETRY_DELAY", retry_delay))
 
         if not self.api_key:
-            logging.warning(f"API Key for model_type '{self.model_type}' not found in environment variables.")
+            logging.warning(
+                f"API Key for model_type '{self.model_type}' not found in environment variables. "
+                "Will send request without Authorization header."
+            )
         self.headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}"
+            "Content-Type": "application/json"
         }
+        if self.api_key:
+            self.headers["Authorization"] = f"Bearer {self.api_key}"
 
-        logging.debug(f"Initialized {self.model_type} API client with URL: {self.base_url}")
+        logging.debug(
+            f"Initialized {self.model_type} API client with URL: {self.base_url} "
+            f"(provider={self.provider})"
+        )
+
+    @staticmethod
+    def _normalize_chat_completions_url(raw_url: str) -> str:
+        """
+        Accepts:
+          - http://127.0.0.1:18080
+          - http://127.0.0.1:18080/v1
+          - http://127.0.0.1:18080/v1/chat/completions
+        And normalizes to a chat-completions endpoint URL.
+        """
+        url = (raw_url or "").strip().strip('"').strip("'")
+        if not url:
+            return "https://api.openai.com/v1/chat/completions"
+
+        if not (url.startswith("http://") or url.startswith("https://")):
+            url = f"http://{url}"
+
+        parsed = urlparse(url)
+        path_parts = [part for part in (parsed.path or "").split("/") if part]
+        lower_parts = [part.lower() for part in path_parts]
+
+        if lower_parts[-2:] == ["chat", "completions"]:
+            pass
+        elif lower_parts and lower_parts[-1] == "v1":
+            path_parts.extend(["chat", "completions"])
+        elif "v1" in lower_parts:
+            path_parts.extend(["chat", "completions"])
+        elif path_parts:
+            path_parts.extend(["v1", "chat", "completions"])
+        else:
+            path_parts = ["v1", "chat", "completions"]
+
+        normalized_path = "/" + "/".join(path_parts)
+        return urlunparse(parsed._replace(path=normalized_path))
+
+    @staticmethod
+    def _infer_provider(url: str) -> str:
+        host = urlparse(url).netloc.lower()
+        if "openrouter.ai" in host:
+            return "openrouter"
+        if "api.openai.com" in host:
+            return "openai"
+        return "other"
+
+    @staticmethod
+    def _extract_text_content(data: Dict[str, Any]) -> Optional[str]:
+        """Extract assistant text across common OpenAI-compatible response formats."""
+        choices = data.get("choices")
+        if isinstance(choices, list) and choices:
+            first = choices[0] if isinstance(choices[0], dict) else {}
+            message = first.get("message", {}) if isinstance(first.get("message"), dict) else {}
+            content = message.get("content")
+
+            if isinstance(content, str):
+                return content
+            if isinstance(content, list):
+                parts = []
+                for item in content:
+                    if isinstance(item, str):
+                        parts.append(item)
+                        continue
+                    if not isinstance(item, dict):
+                        continue
+                    text_val = item.get("text")
+                    if isinstance(text_val, str):
+                        parts.append(text_val)
+                if parts:
+                    return "\n".join(parts).strip()
+
+            text_fallback = first.get("text")
+            if isinstance(text_fallback, str):
+                return text_fallback
+
+        output_text = data.get("output_text")
+        if isinstance(output_text, str):
+            return output_text
+
+        output = data.get("output")
+        if isinstance(output, list):
+            parts = []
+            for block in output:
+                if not isinstance(block, dict):
+                    continue
+                content = block.get("content", [])
+                if not isinstance(content, list):
+                    continue
+                for item in content:
+                    if not isinstance(item, dict):
+                        continue
+                    text_val = item.get("text")
+                    if isinstance(text_val, str):
+                        parts.append(text_val)
+            if parts:
+                return "\n".join(parts).strip()
+
+        return None
 
     def generate(self, model: str, messages: List[Dict[str, str]], temperature: float = 0.7, max_tokens: int = 4000, min_p: Optional[float] = 0.1) -> str:
         """
@@ -50,9 +156,6 @@ class APIClient:
         Handles retries and common errors.
         min_p is applied only if model_type is 'test' and min_p is not None.
         """
-        if not self.api_key:
-             raise ValueError(f"Cannot make API call for '{self.model_type}'. API Key is missing.")
-
         for attempt in range(self.max_retries):
             response = None # Initialize response to None for error checking
             try:
@@ -71,7 +174,7 @@ class APIClient:
                 elif self.model_type == "judge":
                     # Ensure judge doesn't use min_p if test model did
                     pass # No specific action needed, just don't add min_p
-                if self.base_url == 'https://api.openai.com/v1/chat/completions':
+                if self.provider == "openai":
                     if 'min_p' in payload:
                         del payload['min_p']                
                     if model == 'o3':
@@ -89,7 +192,7 @@ class APIClient:
                         del payload['max_tokens']
                         payload['max_completion_tokens'] = max_tokens
                         payload['temperature'] = 1
-                if self.base_url == "https://openrouter.ai/api/v1/chat/completions":
+                if self.provider == "openrouter":
                     if 'qwen3' in model.lower():
                         # optionally disable thinking for qwen3 models
                         system_msg = [{"role": "system", "content": "/no_think"}]
@@ -113,7 +216,7 @@ class APIClient:
 
 
                 #if self.base_url == "https://openrouter.ai/api/v1/chat/completions":
-                if model == 'openai/o3':
+                if model in ['openai/o3', 'o3']:
                     print('!! o3 low thinking')
                     payload["reasoning"] = {                
                         "effort": "low", # Can be "high", "medium", or "low" (OpenAI-style)
@@ -130,11 +233,10 @@ class APIClient:
                 response.raise_for_status() # Raises HTTPError for bad responses (4xx or 5xx)
                 data = response.json()
 
-                if not data.get("choices") or not data["choices"][0].get("message") or "content" not in data["choices"][0]["message"]:
-                     logging.warning(f"Unexpected API response structure on attempt {attempt+1}: {data}")
-                     raise ValueError("Invalid response structure received from API")
-
-                content = data["choices"][0]["message"]["content"]
+                content = self._extract_text_content(data)
+                if not content:
+                    logging.warning(f"Unexpected API response structure on attempt {attempt+1}: {data}")
+                    raise ValueError("Invalid response structure received from API")
 
                 # Optional: Strip <think> blocks if models tend to add them
                 if '<think>' in content and "</think>" in content:
