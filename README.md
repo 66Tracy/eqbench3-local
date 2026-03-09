@@ -80,6 +80,20 @@ EQ-Bench 3 aims to measure **active emotional intelligence** abilities in LLMs. 
 
    - `TEST_API_KEY` & `TEST_API_URL` are used when calling the tested model.  
    - `JUDGE_API_KEY` & `JUDGE_API_URL` are used by the judge model.  
+   - `TEST_MODEL_NAME` and `JUDGE_MODEL_NAME` can be used as defaults for
+     `--test-model` and `--judge-model`.
+   - Optional: `TEST_MAX_TOKENS` controls max generation length for test-model
+     calls (default `8000`). This is useful for local proxies/upstreams that
+     reject large `max_tokens` (for example, 8192 limits).
+
+### Local OpenAI-Compatible Proxy Notes
+- `TEST_API_URL` / `JUDGE_API_URL` accepts:
+  - `http://127.0.0.1:18080`
+  - `http://127.0.0.1:18080/v1`
+  - `http://127.0.0.1:18080/v1/chat/completions`
+- The client normalizes these into a chat-completions endpoint automatically.
+- If your upstream returns errors like `Invalid max_tokens value`, set
+  `TEST_MAX_TOKENS` to a safe value supported by that upstream.
 
 ---
 
@@ -120,9 +134,9 @@ You interact with the main script [`eqbench3.py`](./eqbench3.py). It orchestrate
 
 | Argument                           | Description                                                                                                                             |
 |------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------|
-| `--test-model` **(required)**      | API model identifier for the tested model (e.g. `openai/gpt-4.1-mini`).                                                                       |
+| `--test-model`                     | API model identifier for the tested model (e.g. `openai/gpt-4.1-mini`). Required unless `TEST_MODEL_NAME` is set in `.env`.                 |
 | `--model-name`                     | Logical name used for storing ELO data (defaults to `--test-model` if not supplied). It must be unique to avoid collisions in ELO data. |
-| `--judge-model`                    | Model to be used as the judge for ELO and/or rubric scoring. If `--no-elo` and `--no-rubric` are both set, you can skip this.           |
+| `--judge-model`                    | Model to be used as the judge for ELO and/or rubric scoring. Defaults to `JUDGE_MODEL_NAME` in `.env` when set. If `--no-elo` and `--no-rubric` are both set, you can skip this. |
 | `--runs-file`                      | Local runs data file (`.json` or `.json.gz`) storing scenario transcripts & statuses. Default: `eqbench3_runs.json`.                   |
 | `--elo-results-file`               | Local ELO data file for storing pairwise comparisons & final ELO ratings. Default: `elo_results_eqbench3.json`.                        |
 | `--leaderboard-runs-file`          | Path to the canonical leaderboard runs data (read-only). Default: `data/canonical_leaderboard_results.json.gz`.                         |

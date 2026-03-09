@@ -154,7 +154,7 @@ def print_summary_box(run_key: str, local_runs_file: str, run_elo: bool, run_rub
         rows.extend([
             ("Status:",                run_status),
             ("Duration:",              duration_str),
-            ("Rubric Score (0‑100):",  rubric_score_100_str),
+            ("Rubric Score (0-100):",  rubric_score_100_str),
             ("ELO Raw:",               elo_raw_str),
             ("ELO (Normalised):",      elo_norm_str),
         ])
@@ -184,7 +184,7 @@ def print_summary_box(run_key: str, local_runs_file: str, run_elo: bool, run_rub
         for (lbl, val) in rows:
             if lbl == "Duration:":
                 print(ROW_SEP)
-            if lbl == "Rubric Score (0‑100):":
+            if lbl == "Rubric Score (0-100):":
                 print(ROW_SEP)
                 print(make_row("", "ELO Analysis Results".center(value_col)))
                 print(ROW_SEP)
@@ -689,3 +689,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
